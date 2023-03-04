@@ -1,7 +1,7 @@
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import Column, ForeignKey, Integer, String
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import create_engine, select, Column, ForeignKey, Integer, String
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from contextlib import suppress
+from sqlalchemy.exc import NoResultFound
 
 Base = declarative_base()
 
@@ -165,15 +165,17 @@ class DBManager:
         yield from self.session().scalars(stmt).all()
 
     def get_products(self, category):
-        stmt = select(Category).where(Category.name == category)
-        category = self.session().scalars(stmt).one()
+        with suppress(NoResultFound):
+            stmt = select(Category).where(Category.name == category)
+            category = self.session().scalars(stmt).one()
 
-        stmt = select(Product).join(Category.products).where(Product.category_id == category.id)
-        yield from self.session().scalars(stmt).all()
+            stmt = select(Product).join(Category.products).where(Product.category_id == category.id)
+            yield from self.session().scalars(stmt).all()
 
     def get_product(self, product_name):
-        stmt = select(Product).where(Product.name == product_name)
-        return self.session().scalars(stmt).one()
+        with suppress(NoResultFound):
+            stmt = select(Product).where(Product.name == product_name)
+            return self.session().scalars(stmt).one()
 
 
 def get_db_manager():
