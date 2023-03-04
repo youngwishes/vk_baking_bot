@@ -1,5 +1,6 @@
 import json
 import os
+from vk_bot.db.conf import get_db_manager
 
 
 class Button:
@@ -55,7 +56,6 @@ class VKeyboard:
             json.dump(json_data, f, indent=4)
 
     def add_button(self, button):
-        print(button)
         json_data = self.get_data(to_vk=False)
         if self.count == -1:
             json_data['buttons'].append([button.as_json()])
@@ -90,3 +90,30 @@ class VKeyboard:
 
         with open(self.path, 'r', encoding='utf-8') as f:
             return f.read() if to_vk else json.loads(f.read())
+
+
+def make_main_menu_kb():
+    menu_kb = VKeyboard('menu.json', one_time=False)
+    b1 = Button(label='Категории')
+
+    menu_kb.add_button(b1)
+
+    return menu_kb
+
+
+def make_categories_kb():
+    categories_keyboard = VKeyboard('categories.json', one_time=False)
+    for cat in get_db_manager().get_categories():
+        categories_keyboard.add_button(Button(label=cat.name, color="primary"))
+
+    return categories_keyboard
+
+
+def make_products_kb(message):
+    products_keyboard = VKeyboard('products.json', one_time=False)
+    for product in get_db_manager().get_products(message.text):
+
+        products_keyboard.add_button(Button(label=product.name))
+
+    return products_keyboard
+

@@ -5,6 +5,18 @@ from .types import Message, UsersList
 
 
 class VKBot:
+    """
+    __longpoll_url: (Документация) https://dev.vk.com/method/groups.getLongPollServer
+    __send_message_url: (Документация) https://dev.vk.com/method/messages.send
+    __photo_server_url: (Документация) https://dev.vk.com/method/photos.getMessagesUploadServer
+    __save_photo_url: (Документация) https://dev.vk.com/method/photos.saveMessagesPhoto
+    __version: Версия API
+    __group_id: ID группы в VK
+    logger: Логгер
+    users_list: Список пользователей, которые пользуются ботом
+    word_to_prev_state: Ключевое слово, чтобы вернуться на предыдущее состояние в машине состояний
+    """
+
     __longpoll_url = 'https://api.vk.com/method/groups.getLongPollServer'
     __send_message_url = 'https://api.vk.com/method/messages.send'
     __photo_server_url = "https://api.vk.com/method/photos.getMessagesUploadServer"
@@ -14,9 +26,15 @@ class VKBot:
     __group_id = '218434110'
     logger = None
     users_list = UsersList()
-    wort_to_prev_state = "Назад 🛑"
+    word_to_prev_state = "Назад 🛑"
 
     def __init__(self, token):
+        """
+
+        :param token: Токен бота
+        :var self._data: key, server, ts в виде словаря
+        :var self.message_handlers: Список с обработчиками сообщений (функции под декоратором message_handler).
+        """
         self.__token = token
         self._data = self.get_longpoll_data()
 
@@ -49,21 +67,22 @@ class VKBot:
 
         return params
 
-    @staticmethod
-    def _build_handler_dict(handler, **kwargs):
-        return {
-            'function': handler,
-            'commands': kwargs['commands'] if kwargs['commands'] else [],
-            'state': kwargs['state'],
-            'is_menu': kwargs['is_menu'],
-        }
-
     def _get_photo_server(self):
+        """
+        Функция делающая запрос на "https://api.vk.com/method/photos.getMessagesUploadServer"
+
+        :return: url, куда грузить фотки
+        """
         response = requests.get(self.__photo_server_url, params={'access_token': self.__token, 'v': self.__version})
         upload_url = response.json()['response']['upload_url']
         return upload_url
 
     def _save_photo(self, hash, server, photo):
+        """
+        Параметры, которые возвращаются после запроса на URL,
+        который возвращает функция _get_photo_server
+
+        """
         params = {
             'access_token': self.__token,
             'v': self.__version,
@@ -80,13 +99,21 @@ class VKBot:
         return f'photo{owner_id}_{id_}'
 
     def get_photo(self, photo):
+        """
+        :param photo: Фотография которую нужно отправить пользователю
+        """
         upload_url = self._get_photo_server()
         response = requests.post(upload_url, files={'photo': photo})
 
         return self._save_photo(**response.json())
 
     def send_message(self, user_id, text, keyboard=None, photo=None):
-
+        """
+        :param user_id: Кому отправляем
+        :param text: Что отправляем
+        :param keyboard: Есть ли клавиатура
+        :param photo: Есть ли фотка
+        """
         if photo:
             photo = self.get_photo(photo)
 
@@ -105,6 +132,10 @@ class VKBot:
         self.logger.info(f"🤖 has sent the message: '{text}'")
 
     def longpolling(self):
+        """
+        Реализация длинных запросов
+        :return:
+        """
         params = self._get_longpoll_check_params()
         server = params['server']
         self.logger.debug(f"🤖 will send the request to the server: {server}\nparams: {params}")
@@ -123,8 +154,35 @@ class VKBot:
                         self.logger.info(f"🤖 just got a message. He is thinking what he need answer...")
                         threading.Thread(target=self._handle, args=(Message(data),)).start()
 
-    def message_handler(self, commands=None, is_menu=None, state=None, need_to_miss_if_back=None):
+    @staticmethod
+    def _build_handler_dict(handler, **kwargs):
+        """
+        :param handler: Функция-обработчик сообщений (под декоратором message_handler)
+        :param kwargs: Параметры декоратора
+        :return:
+        """
+        handler_dict = {
+            key: kwargs[key] for key in kwargs
+        }
+        handler_dict['function'] = handler
+
+        return handler_dict
+
+    def message_handler(self, commands=None, state=None, need_to_miss_if_back=None):
+        """
+        :param commands: Команды, на которые реагирует функция
+        :param state: Состояние, которая описывает данная функция
+        :param need_to_miss_if_back: Нужно ли пропускать это состояние, если пользователь нажимает "Назад"
+        :return:
+        """
+
         def wrapper(handler):
+            """
+            Построение сценариев, создание хендлеров, добавление хендлеров в список
+            :param handler:
+            :return:
+            """
+
             if state:
                 state.value = handler
                 state.need_to_miss_if_back = need_to_miss_if_back
@@ -133,8 +191,7 @@ class VKBot:
                 self.logger.info(f"Scenario was successfully updated: {state.scenario}")
 
             handler_dict = self._build_handler_dict(
-                state or handler, commands=commands,
-                state=state, is_menu=is_menu
+                state or handler, commands=commands if commands else [], state=state
             )
 
             self.message_handlers.append(handler_dict)
@@ -142,33 +199,26 @@ class VKBot:
 
         return wrapper
 
-    def set_user_state(self, user, message):
-        for handler in self.message_handlers:
-            if message.text in handler['commands']:
-                state = handler['state']
-
-                if state == state.scenario[0]:
-                    user.state = handler['state']
-                    return True
-
-        return self.unknown_command(message)
-
     def _handle(self, message):
+        """
+        Здесь происходит вся логика работы состояний, эта функция отвечает за то, какой сработает message_handler.
+        :param message: Сообщение пользователя
+        :return:
+        """
         user = self.users_list.get_user_by_id(message.user_id)
 
         if not user or message.text == "Меню 🔍":
-            main_menu = list(filter(lambda handler: handler['is_menu'], self.message_handlers))[0]
-            return main_menu['function'](message)
+            return self.main_menu(message)
 
         self.logger.info(f"User has {user.state} state.")
 
-        if message.text == self.wort_to_prev_state:
+        if message.text == self.word_to_prev_state:
             return self.get_previous_state(user, message)
 
         if not user.state:
             is_specified = self.set_user_state(user, message)
             if not is_specified:
-                return False
+                return self.unknown_command(message)
             return user.state.value(message)
 
         if user.state.next:
@@ -177,17 +227,53 @@ class VKBot:
 
         return user.state.value(message)
 
+    def set_user_state(self, user, message):
+        """
+        Установка состояния пользователя
+        :param user: Пользователь
+        :param message: Сообщение
+        :return:
+        """
+        for handler in self.message_handlers:
+            if message.text in handler['commands']:
+                state = handler['state']
+
+                if state == state.scenario[0]:
+                    user.state = handler['state']
+                    return True
+
     def get_previous_state(self, user, message):
+        """
+        Работа с командой "Назад 🛑". Проверка предыдущего состояния.
+        :param user: Пользователь
+        :param message: Сообщение
+        :return: State.value
+        """
         if user.state:
             if user.state.prev:
                 user.state = user.state.prev
                 while user.state.need_to_miss_if_back:
                     user.state = user.state.prev
-
                 return user.state.value(message)
             else:
-                main_menu = list(filter(lambda handler: handler['is_menu'], self.message_handlers))[0]
-                return main_menu['function'](message)
+                return self.main_menu(message)
 
-    def unknown_command(self, message):
+    @staticmethod
+    def unknown_command(message):
+        """
+        Функция срабатывает, когда у пользователя нет состояния и он вводит незнакомую боту команду.
+        Необходимо переопределить в наследнике
+        :param message: Сообщение
+        :return:
+        """
+        pass
+
+    @staticmethod
+    def main_menu(message):
+        """
+        Функция срабатывает, когда пользователь вводит "Меню 🔍" ИЛИ он еще не добавлен в список пользователей.
+        Необходимо переопределить в наследнике
+        :param message: Сообщение
+        :return:
+        """
         pass
