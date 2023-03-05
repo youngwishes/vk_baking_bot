@@ -7,10 +7,12 @@ import logging.config
 from dict_config import dict_config
 from vk_bot.db.conf import get_db_manager
 
+logging.config.dictConfig(dict_config)
+
 
 class MyBot(VKBot):
     logger = logging.getLogger('root')
-    logging.config.dictConfig(dict_config)
+
     word_to_prev_state = "Назад 🛑"
 
     @staticmethod
